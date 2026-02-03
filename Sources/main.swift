@@ -9,31 +9,98 @@ struct PortInfo: Identifiable, Hashable {
     let process: String
     let command: String
     
-    var displayName: String {
-        if command.contains("next") { return "Next.js" }
-        if command.contains("vite") { return "Vite" }
-        if command.contains("node") { return "Node.js" }
-        if command.contains("python") { return "Python" }
-        if command.contains("ruby") { return "Ruby" }
+    var autoName: String {
+        let lower = command.lowercased()
+        if lower.contains("next") { return "Next.js" }
+        if lower.contains("vite") { return "Vite" }
+        if lower.contains("astro") { return "Astro" }
+        if lower.contains("remix") { return "Remix" }
+        if lower.contains("nuxt") { return "Nuxt" }
+        if lower.contains("svelte") { return "SvelteKit" }
+        if lower.contains("webpack") { return "Webpack" }
+        if lower.contains("parcel") { return "Parcel" }
+        if lower.contains("esbuild") { return "esbuild" }
+        if lower.contains("turbo") { return "Turbopack" }
+        if lower.contains("node") { return "Node.js" }
+        if lower.contains("python") || lower.contains("uvicorn") || lower.contains("gunicorn") { return "Python" }
+        if lower.contains("flask") { return "Flask" }
+        if lower.contains("django") { return "Django" }
+        if lower.contains("fastapi") { return "FastAPI" }
+        if lower.contains("ruby") || lower.contains("rails") { return "Ruby" }
+        if lower.contains("php") || lower.contains("artisan") { return "PHP" }
+        if lower.contains("go") { return "Go" }
+        if lower.contains("rust") || lower.contains("cargo") { return "Rust" }
+        if lower.contains("java") || lower.contains("spring") { return "Java" }
+        if lower.contains("ControlCe") { return "ControlCenter" }
         return process
     }
     
-    var emoji: String {
-        switch displayName {
-        case "Next.js": return "▲"
-        case "Vite": return "⚡"
-        case "Node.js": return "🟢"
-        case "Python": return "🐍"
-        case "Ruby": return "💎"
+    func emoji(for name: String) -> String {
+        switch name.lowercased() {
+        case "next.js": return "▲"
+        case "vite": return "⚡"
+        case "node.js": return "🟢"
+        case "python", "flask", "django", "fastapi": return "🐍"
+        case "ruby": return "💎"
+        case "go": return "🐹"
+        case "rust": return "🦀"
+        case "java": return "☕"
+        case "php": return "🐘"
+        case "astro": return "🚀"
+        case "controlcenter": return "⚙️"
         default: return "🔵"
         }
+    }
+}
+
+// MARK: - Name Storage
+class PortNameStore: ObservableObject {
+    @Published var customNames: [Int: String] = [:]
+    
+    private let key = "DevPorts.customNames"
+    
+    init() {
+        load()
+    }
+    
+    func load() {
+        if let data = UserDefaults.standard.dictionary(forKey: key) as? [String: String] {
+            customNames = Dictionary(uniqueKeysWithValues: data.compactMap { key, value in
+                if let port = Int(key) { return (port, value) }
+                return nil
+            })
+        }
+    }
+    
+    func save() {
+        let data = Dictionary(uniqueKeysWithValues: customNames.map { ("\($0.key)", $0.value) })
+        UserDefaults.standard.set(data, forKey: key)
+    }
+    
+    func getName(for port: PortInfo) -> String {
+        return customNames[port.port] ?? port.autoName
+    }
+    
+    func setName(for port: Int, name: String?) {
+        if let name = name, !name.isEmpty {
+            customNames[port] = name
+        } else {
+            customNames.removeValue(forKey: port)
+        }
+        save()
     }
 }
 
 class PortScanner: ObservableObject {
     @Published var ports: [PortInfo] = []
     
-    let commonPorts = [3000, 3001, 3002, 3100, 3200, 3300, 4000, 5000, 5173, 5174, 8000, 8080, 8888]
+    // Dev port ranges - skip system ports and known non-dev ports
+    let devPortRange = 1024...65535
+    let excludedPorts: Set<Int> = [
+        49152, 49153, 49154, 49155, // macOS dynamic ports
+        5353, // mDNS
+        631,  // CUPS
+    ]
     
     func scan() {
         DispatchQueue.global(qos: .userInitiated).async {
@@ -61,9 +128,14 @@ class PortScanner: ObservableObject {
                             let pid = Int(parts[1]) ?? 0
                             let portPart = String(parts[8])
                             
+                            // Skip system processes
+                            if process == "launchd" || process == "systemd" { continue }
+                            
                             if let colonIndex = portPart.lastIndex(of: ":") {
                                 let portStr = String(portPart[portPart.index(after: colonIndex)...])
-                                if let port = Int(portStr), self.commonPorts.contains(port) {
+                                if let port = Int(portStr),
+                                   self.devPortRange.contains(port),
+                                   !self.excludedPorts.contains(port) {
                                     let info = PortInfo(port: port, pid: pid, process: process, command: process)
                                     if !results.contains(where: { $0.port == port }) {
                                         results.append(info)
@@ -107,48 +179,68 @@ class PortScanner: ObservableObject {
 // MARK: - Menu View
 struct PortMenuView: View {
     @ObservedObject var scanner: PortScanner
+    @ObservedObject var nameStore: PortNameStore
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
             HStack {
-                Text("🚀 Dev Ports")
-                    .font(.headline)
+                Text("🚀")
+                Text("Dev Ports")
+                    .font(.system(size: 13, weight: .semibold))
                 Spacer()
                 Button(action: { scanner.scan() }) {
                     Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
+                .foregroundColor(.secondary)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
             
             Divider()
             
             if scanner.ports.isEmpty {
-                Text("No dev servers running")
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(scanner.ports) { port in
-                    PortRowView(port: port, scanner: scanner)
+                VStack(spacing: 8) {
+                    Image(systemName: "network.slash")
+                        .font(.system(size: 24))
+                        .foregroundColor(.secondary)
+                    Text("No dev servers running")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(scanner.ports) { port in
+                            PortRowView(port: port, scanner: scanner, nameStore: nameStore)
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
             }
             
             Divider()
             
+            // Quit button
             Button(action: { NSApplication.shared.terminate(nil) }) {
                 HStack {
                     Text("Quit")
+                        .font(.system(size: 13))
                     Spacer()
-                    Text("⌘Q").foregroundColor(.secondary)
+                    Text("⌘Q")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.bottom, 8)
         }
-        .frame(width: 280)
+        .frame(width: 260)
         .onAppear { scanner.scan() }
     }
 }
@@ -156,41 +248,97 @@ struct PortMenuView: View {
 struct PortRowView: View {
     let port: PortInfo
     @ObservedObject var scanner: PortScanner
+    @ObservedObject var nameStore: PortNameStore
     @State private var isHovering = false
+    @State private var isEditing = false
+    @State private var editingName = ""
+    
+    var displayName: String {
+        nameStore.getName(for: port)
+    }
     
     var body: some View {
-        HStack {
-            Text(port.emoji)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 8) {
+            // Status indicator
+            Circle()
+                .fill(Color.green)
+                .frame(width: 8, height: 8)
+            
+            // Port info
+            VStack(alignment: .leading, spacing: 1) {
                 Text("localhost:\(port.port)")
-                    .font(.system(.body, design: .monospaced))
-                Text(port.displayName)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 13, design: .monospaced))
+                
+                if isEditing {
+                    TextField("Name", text: $editingName, onCommit: {
+                        nameStore.setName(for: port.port, name: editingName)
+                        isEditing = false
+                    })
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.blue)
+                } else {
+                    Text(displayName)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .onTapGesture(count: 2) {
+                            editingName = displayName
+                            isEditing = true
+                        }
+                }
             }
+            
             Spacer()
             
-            if isHovering {
+            // Action buttons - always visible but subtle
+            HStack(spacing: 4) {
                 Button(action: { scanner.openInBrowser(port.port) }) {
                     Image(systemName: "safari")
+                        .font(.system(size: 12))
                 }
                 .buttonStyle(.plain)
+                .foregroundColor(isHovering ? .blue : .secondary.opacity(0.5))
                 .help("Open in browser")
                 
                 Button(action: { scanner.killPort(port.port) }) {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.red)
+                        .font(.system(size: 12))
                 }
                 .buttonStyle(.plain)
+                .foregroundColor(isHovering ? .red : .secondary.opacity(0.5))
                 .help("Kill process")
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(isHovering ? Color.gray.opacity(0.2) : Color.clear)
-        .cornerRadius(6)
+        .background(isHovering ? Color.primary.opacity(0.08) : Color.clear)
+        .contentShape(Rectangle())
         .onHover { hovering in
             isHovering = hovering
+        }
+        .onTapGesture {
+            scanner.openInBrowser(port.port)
+        }
+        .contextMenu {
+            Button("Open in Browser") {
+                scanner.openInBrowser(port.port)
+            }
+            Button("Copy URL") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString("http://localhost:\(port.port)", forType: .string)
+            }
+            Divider()
+            Button("Rename...") {
+                editingName = displayName
+                isEditing = true
+            }
+            Button("Reset Name") {
+                nameStore.setName(for: port.port, name: nil)
+            }
+            Divider()
+            Button("Kill Process", role: .destructive) {
+                scanner.killPort(port.port)
+            }
         }
     }
 }
@@ -200,7 +348,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
     let scanner = PortScanner()
+    let nameStore = PortNameStore()
     var timer: Timer?
+    var eventMonitor: Any?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create status item
@@ -209,21 +359,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "network", accessibilityDescription: "Dev Ports")
             button.action = #selector(togglePopover)
+            button.target = self
         }
         
         // Create popover
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 280, height: 300)
+        popover.contentSize = NSSize(width: 260, height: 200)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: PortMenuView(scanner: scanner))
+        popover.animates = true
+        popover.contentViewController = NSHostingController(
+            rootView: PortMenuView(scanner: scanner, nameStore: nameStore)
+        )
         
-        // Auto-refresh every 10 seconds
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+        // Close popover when clicking outside
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.popover.performClose(nil)
+        }
+        
+        // Auto-refresh every 5 seconds
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             self?.scanner.scan()
         }
         
         // Initial scan
         scanner.scan()
+    }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        timer?.invalidate()
     }
     
     @objc func togglePopover() {
@@ -233,6 +399,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 scanner.scan()
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                popover.contentViewController?.view.window?.makeKey()
             }
         }
     }
