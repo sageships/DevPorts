@@ -180,6 +180,22 @@ class PortScanner: ObservableObject {
 struct PortMenuView: View {
     @ObservedObject var scanner: PortScanner
     @ObservedObject var nameStore: PortNameStore
+    @State private var copied = false
+    
+    func copyAllPorts() {
+        let text = scanner.ports.map { port in
+            let name = nameStore.getName(for: port)
+            return "localhost:\(port.port) - \(name) (\(port.process))"
+        }.joined(separator: "\n")
+        
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            copied = false
+        }
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -189,6 +205,17 @@ struct PortMenuView: View {
                 Text("Dev Ports")
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
+                
+                if !scanner.ports.isEmpty {
+                    Button(action: copyAllPorts) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(copied ? .green : .secondary)
+                    .help("Copy all ports")
+                }
+                
                 Button(action: { scanner.scan() }) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
@@ -240,7 +267,7 @@ struct PortMenuView: View {
             }
             .buttonStyle(.plain)
         }
-        .frame(width: 260)
+        .frame(width: 280)
         .onAppear { scanner.scan() }
     }
 }
@@ -266,8 +293,15 @@ struct PortRowView: View {
             
             // Port info
             VStack(alignment: .leading, spacing: 1) {
-                Text("localhost:\(port.port)")
-                    .font(.system(size: 13, design: .monospaced))
+                HStack(spacing: 4) {
+                    Text("localhost:\(port.port)")
+                        .font(.system(size: 13, design: .monospaced))
+                    Text("·")
+                        .foregroundColor(.secondary)
+                    Text(port.process)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
                 
                 if isEditing {
                     TextField("Name", text: $editingName, onCommit: {
@@ -280,7 +314,7 @@ struct PortRowView: View {
                 } else {
                     Text(displayName)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.blue.opacity(0.8))
                         .onTapGesture(count: 2) {
                             editingName = displayName
                             isEditing = true
@@ -326,6 +360,11 @@ struct PortRowView: View {
             Button("Copy URL") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString("http://localhost:\(port.port)", forType: .string)
+            }
+            Button("Copy with Name") {
+                let text = "localhost:\(port.port) - \(displayName) (\(port.process))"
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
             }
             Divider()
             Button("Rename...") {
