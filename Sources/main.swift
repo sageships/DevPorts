@@ -94,12 +94,31 @@ class PortNameStore: ObservableObject {
 class PortScanner: ObservableObject {
     @Published var ports: [PortInfo] = []
     
-    // Dev port ranges - skip system ports and known non-dev ports
-    let devPortRange = 1024...65535
-    let excludedPorts: Set<Int> = [
-        49152, 49153, 49154, 49155, // macOS dynamic ports
-        5353, // mDNS
-        631,  // CUPS
+    // Common dev server ports only
+    let devPorts: Set<Int> = [
+        // Web dev
+        3000, 3001, 3002, 3003, 3004, 3005,
+        3100, 3200, 3300,
+        4000, 4001, 4200, 4300,
+        5000, 5001, 5173, 5174, 5175, 5500,
+        8000, 8001, 8002, 8080, 8081, 8888, 8443,
+        9000, 9001, 9090,
+        // Databases (optional, useful to see)
+        5432,  // PostgreSQL
+        3306,  // MySQL
+        6379,  // Redis
+        27017, // MongoDB
+    ]
+    
+    // Processes to always exclude (system/IDE junk)
+    let excludedProcesses: Set<String> = [
+        "ControlCe", "Control Center", "controlcenter",
+        "rapportd", "Rapport",
+        "Cursor",  // IDE internals
+        "Code Helper", "Code - Insiders",
+        "TechSmith",
+        "stable",  // SD WebUI uses specific ports anyway
+        "mongod",  // Covered by port list if needed
     ]
     
     func scan() {
@@ -128,14 +147,14 @@ class PortScanner: ObservableObject {
                             let pid = Int(parts[1]) ?? 0
                             let portPart = String(parts[8])
                             
-                            // Skip system processes
+                            // Skip system/IDE processes
                             if process == "launchd" || process == "systemd" { continue }
+                            if self.excludedProcesses.contains(process) { continue }
                             
                             if let colonIndex = portPart.lastIndex(of: ":") {
                                 let portStr = String(portPart[portPart.index(after: colonIndex)...])
                                 if let port = Int(portStr),
-                                   self.devPortRange.contains(port),
-                                   !self.excludedPorts.contains(port) {
+                                   self.devPorts.contains(port) {
                                     let info = PortInfo(port: port, pid: pid, process: process, command: process)
                                     if !results.contains(where: { $0.port == port }) {
                                         results.append(info)
